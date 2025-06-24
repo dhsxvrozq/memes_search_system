@@ -1,0 +1,48 @@
+FROM python:3.9-slim
+
+# Устанавливаем системные зависимости
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgtk-3-0 \
+    libgl1-mesa-glx \
+    libavcodec59 \
+    libavformat59 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем Python зависимости
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn[standard] \
+    python-multipart \
+    easyocr \
+    opencv-python-headless \
+    pillow \
+    numpy
+# Предварительно загружаем модели OCR
+RUN python -c "import easyocr; easyocr.Reader(['ru', 'en'], verbose=False)"
+
+# Создаем пользователя для безопасности
+RUN useradd -m -u 1000 ocr_user
+
+# Создаем рабочую директорию
+WORKDIR /app
+
+# Копируем код
+COPY ocr_api.py /app
+
+
+# Меняем владельца файлов
+# RUN chown -R ocr_user:ocr_user /app
+# USER ocr_user
+
+# Открываем порт
+EXPOSE 8000
+RUN ls -la /app
+
+# Запускаем сервер
+CMD ["uvicorn", "--app-dir", "/app", "ocr_api:app", "--host", "0.0.0.0", "--port", "8000"]
