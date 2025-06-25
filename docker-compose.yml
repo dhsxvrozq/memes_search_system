@@ -1,28 +1,9 @@
 
 services:
-  ocr_api:
-    build:
-      context: ocr
-      dockerfile: Dockerfile.ocr  # Указываем путь к Dockerfile для сервиса ocr-api
-    # ports:
-    #   - "8000:8000"
-    container_name: ocr-service
-    restart: unless-stopped
-    environment:
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
   tg_bot:
     build:
-      context: ./tg_bot  # Указываем контекст сборки для tg-bot
-      dockerfile: Dockerfile.tg_bot
+      context: .  # Указываем контекст сборки для tg-bot
+      dockerfile: Dockerfile
     container_name: tg-bot-service
     restart: unless-stopped
     environment:
@@ -30,11 +11,3 @@ services:
       - TGBOT_TOKEN
       - SOURCE_CHAT_ID
       - TARGET_CHANNEL_ID
-    volumes:
-      - ./logs:/app/logs
-    depends_on:
-      - ocr_api # Зависимость от сервиса ocr-api, чтобы tg-bot запускался после него
-
-networks:
-  default:
-    name: ocr-network
