@@ -48,7 +48,12 @@ def test_chat_access():
         logger.error(f"Ошибка доступа к чатам: {e}")
         return False
 
-@bot.message_handler(func=lambda message: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'])
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    bot.send_message(message.chat.id, "Этот бот распознает текст на пикчах из чата и постит их в закрытый канал")
+
+
+@bot.message_handler(func=lambda message: True, content_types=['photo'])#'text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker'
 def handle_messages(message):
     if message.chat.id == MEMASY_CHAT_ID:
         logger.info(f"Получено сообщение от пользователя {message.from_user.id}")
