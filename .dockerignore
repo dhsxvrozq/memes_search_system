@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+*.log
+*.tmp
+*.bak
+*.DS_Store
+*.env
+*.venv/
+.env
+.vscode/
+.idea/
+downloads/
+йцу/
