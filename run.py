@@ -100,7 +100,7 @@ def handle_video_links(message):
                     bot.send_video(
                         SOURCE_CHAT_ID,
                         video=v,
-                        caption=f'',
+                        caption=f'{message.from_user.full_name} \n@{message.from_user.username}',
                         supports_streaming=True   # ключевой флаг
                     )
 
