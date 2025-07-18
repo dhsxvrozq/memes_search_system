@@ -10,7 +10,7 @@ import time
 from collections import defaultdict
 
 # Basic logging setup
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -27,172 +27,111 @@ media_group_timers = {}
 
 # Function to recognize text from a photo by file_id
 def recognize_text_from_photo(file_id):
+    logger.debug(f"Starting OCR for file_id={file_id}")
     try:
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         image = Image.open(BytesIO(downloaded_file))
-        text = pytesseract.image_to_string(image, lang='rus+eng')
-        return text.strip()
+        text = pytesseract.image_to_string(image, lang='rus+eng').strip()
+        logger.debug(f"OCR result for file_id={file_id}: '{text}'")
+        return text
     except Exception as e:
-        logger.error(f"Text recognition error: {e}")
+        logger.error(f"Text recognition error for file_id={file_id}: {e}")
         return ""
 
 def process_media_group(media_group_id):
-    """Process collected media group"""
+    logger.debug(f"Processing media group: {media_group_id}")
     try:
-        if media_group_id not in media_groups:
+        messages = media_groups.pop(media_group_id, [])
+        if not messages:
             return
-            
-        messages = media_groups[media_group_id]
-        # Sort messages by message_id to maintain order
         messages.sort(key=lambda x: x.message_id)
-        
-        media_to_send = []
+
+        media_group = []
         media_with_text = []
-        
-        for message in messages:
-            if message.photo:
-                file_id = message.photo[-1].file_id
-                media_to_send.append(telebot.types.InputMediaPhoto(file_id))
-                
-                # Recognize text for TARGET_CHANNEL_ID
+        for msg in messages:
+            if msg.photo:
+                file_id = msg.photo[-1].file_id
+                media_group.append(telebot.types.InputMediaPhoto(file_id))
                 text = recognize_text_from_photo(file_id)
-                if text:
-                    media_with_text.append(telebot.types.InputMediaPhoto(file_id, caption=text))
-                    
-            elif message.video:
-                file_id = message.video.file_id
-                media_to_send.append(telebot.types.InputMediaVideo(file_id))
-        
-        # Send media group to SOURCE_CHAT_ID
-        if media_to_send:
-            bot.send_media_group(SOURCE_CHAT_ID, media_to_send)
-            
-            # Send photos with recognized text to TARGET_CHANNEL_ID
-            if media_with_text:
-                bot.send_media_group(TARGET_CHANNEL_ID, media_with_text)
-        
-        # Delete original messages
-        for message in messages:
+                caption = text if text else None
+                media_with_text.append(telebot.types.InputMediaPhoto(file_id, caption=caption) if caption else telebot.types.InputMediaPhoto(file_id))
+            elif msg.video:
+                media_group.append(telebot.types.InputMediaVideo(msg.video.file_id))
+
+        bot.send_media_group(SOURCE_CHAT_ID, media_group)
+        bot.send_media_group(TARGET_CHANNEL_ID, media_with_text)
+
+        for msg in messages:
             try:
-                bot.delete_message(message.chat.id, message.message_id)
+                bot.delete_message(msg.chat.id, msg.message_id)
             except Exception as e:
-                logger.error(f"Error deleting message: {e}")
-        
-        # Clean up
-        del media_groups[media_group_id]
-        if media_group_id in media_group_timers:
-            del media_group_timers[media_group_id]
-            
+                logger.error(f"Error deleting message id={msg.message_id}: {e}")
     except Exception as e:
-        logger.error(f"Error processing media group: {e}")
+        logger.error(f"Error in process_media_group: {e}")
+
 
 def delayed_process_media_group(media_group_id):
-    """Process media group after a delay to collect all messages"""
-    time.sleep(1)  # Wait 1 second to collect all messages in the group
+    time.sleep(1)
     process_media_group(media_group_id)
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    text = (
+    bot.send_message(message.chat.id, (
         "🎯 Функциональность бота \"МЕМОЛОГ\"\n\n"
         "1️⃣ Распознавание текста на мемах  \n"
-        "Бот автоматически обрабатывает картинки, отправленные в чат:  \n"
-        "🔍 находит и распознаёт текст на изображении  \n"
-        "📤 пересылает мем в закрытый канал с подписью  \n"
-        "🔎 благодаря этому можно быстро найти нужные мемы по тексту  \n"
-        "📌 Мемасы.Поиск — https://t.me/+Q56JVqUrZThjMjJi\n\n"
+        "🔍 распознаёт текст на изображении и пересылает в канал  \n"
         "2️⃣ Очистка YouTube Shorts  \n"
-        "📎 Просто отправь ссылку на YouTube Shorts в чат  \n"
-        "🤖 Бот удалит ссылку и вернёт в чат чистое видео — без лишнего мусора"
-    )
-    bot.send_message(message.chat.id, text)
-
-@bot.message_handler(func=lambda message: message.chat.id == SOURCE_CHAT_ID and message.forward_date is not None, content_types=['photo', 'video'])
-def handle_forwarded_media(message):
-    try:
-        # Check if this is part of a media group
-        if message.media_group_id:
-            media_group_id = message.media_group_id
-            media_groups[media_group_id].append(message)
-            
-            # Start timer for processing media group (or reset if already exists)
-            if media_group_id in media_group_timers:
-                media_group_timers[media_group_id].cancel()
-            
-            import threading
-            timer = threading.Timer(1.0, delayed_process_media_group, args=(media_group_id,))
-            media_group_timers[media_group_id] = timer
-            timer.start()
-            
-        else:
-            # Single media message - process immediately
-            if message.photo:
-                file_id = message.photo[-1].file_id
-                bot.send_photo(SOURCE_CHAT_ID, file_id)
-                text = recognize_text_from_photo(file_id)
-                if text:
-                    bot.send_photo(TARGET_CHANNEL_ID, file_id, caption=text)
-
-            elif message.video:
-                file_id = message.video.file_id
-                bot.send_video(SOURCE_CHAT_ID, file_id, supports_streaming=True)
-
-            # Delete the original forwarded message
-            bot.delete_message(message.chat.id, message.message_id)
-
-    except Exception as e:
-        logger.error(f"Error processing forwarded media: {e}")
-
-@bot.message_handler(func=lambda message: message.chat.id == SOURCE_CHAT_ID, content_types=['photo'])
-def handle_photo(message):
-    try:
-        file_id = message.photo[-1].file_id
-        text = recognize_text_from_photo(file_id)
-        if text:
-            bot.send_photo(TARGET_CHANNEL_ID, file_id, caption=text)
-    except Exception as e:
-        logger.error(f"Error processing photo: {e}")
+        "🤖 отправьте ссылку на Shorts — бот вернёт чистое видео"
+    ))
 
 # YouTube Shorts handler
-YOUTUBE_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com|youtu\.be)/(watch\?v=)?[\w-]+', re.IGNORECASE)
-
+YOUTUBE_SHORTS_RE = re.compile(r"(https?://)?(www\.)?youtube\.com/shorts/[\w-]+", re.IGNORECASE)
 from yt_download import download_video
 
-@bot.message_handler(func=lambda m: m.chat.id == SOURCE_CHAT_ID, content_types=['text'])
+@bot.message_handler(func=lambda m: m.chat.id == SOURCE_CHAT_ID and m.entities, content_types=['text'])
 def handle_video_links(message):
-    if not message.entities:
-        return
-
-    url = None
     for ent in message.entities:
-        if ent.type == 'url':
-            candidate = message.text[ent.offset:ent.offset + ent.length]
-        elif ent.type == 'text_link':
-            candidate = ent.url
-        else:
-            continue
+        if ent.type in ['url', 'text_link']:
+            url = message.text[ent.offset:ent.offset+ent.length] if ent.type=='url' else ent.url
+            if YOUTUBE_SHORTS_RE.search(url):
+                try:
+                    path = download_video(url)
+                    with open(path, 'rb') as v:
+                        bot.send_video(SOURCE_CHAT_ID, v, supports_streaming=True)
+                    bot.delete_message(message.chat.id, message.message_id)
+                    os.remove(path)
+                except Exception as e:
+                    logger.error(f"Error downloading shorts: {e}")
+                break
 
-        if YOUTUBE_RE.search(candidate):
-            url = candidate
-            break
+# Forwarded media (group/single)
+@bot.message_handler(func=lambda m: m.chat.id == SOURCE_CHAT_ID and m.forward_date, content_types=['photo', 'video'])
+def handle_forwarded(m):
+    if m.media_group_id:
+        gid = m.media_group_id
+        media_groups[gid].append(m)
+        if gid in media_group_timers:
+            media_group_timers[gid].cancel()
+        import threading
+        t = threading.Timer(1, delayed_process_media_group, args=(gid,))
+        media_group_timers[gid] = t
+        t.start()
+    else:
+        if m.photo:
+            fid = m.photo[-1].file_id
+            bot.send_photo(SOURCE_CHAT_ID, fid)
+            text = recognize_text_from_photo(fid)
+            bot.send_photo(TARGET_CHANNEL_ID, fid, caption=text if text else None)
+        elif m.video:
+            bot.send_video(SOURCE_CHAT_ID, m.video.file_id, supports_streaming=True)
+        bot.delete_message(m.chat.id, m.message_id)
 
-    if not url:
-        return
+# Direct photo (no forward)
+@bot.message_handler(func=lambda m: m.chat.id == SOURCE_CHAT_ID, content_types=['photo'])
+def handle_photo(m):
+    fid = m.photo[-1].file_id
+    text = recognize_text_from_photo(fid)
+    bot.send_photo(TARGET_CHANNEL_ID, fid, caption=text if text else None)
 
-    try:
-        video_path = download_video(url)
-        if video_path and os.path.isfile(video_path):
-            with open(video_path, 'rb') as v:
-                bot.send_video(
-                    SOURCE_CHAT_ID,
-                    video=v,
-                    supports_streaming=True
-                )
-                bot.delete_message(message.chat.id, message.message_id)
-            os.remove(video_path)
-    except Exception as e:
-        logger.error(f"Error processing YouTube link: {e}")
-
-logger.info("Bot started and waiting for messages...")
 bot.polling(none_stop=True)
