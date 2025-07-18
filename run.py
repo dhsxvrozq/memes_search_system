@@ -37,7 +37,7 @@ def recognize_text_from_photo(file_id):
         logger.error(f"Text recognition error: {e}")
         return ""
 
-def process_media_group(media_group_id, user_info):
+def process_media_group(media_group_id):
     """Process collected media group"""
     try:
         if media_group_id not in media_groups:
@@ -64,12 +64,8 @@ def process_media_group(media_group_id, user_info):
                 file_id = message.video.file_id
                 media_to_send.append(telebot.types.InputMediaVideo(file_id))
         
-        # Send media group to SOURCE_CHAT_ID with user info
+        # Send media group to SOURCE_CHAT_ID
         if media_to_send:
-            # Add caption to first media item
-            if media_to_send:
-                media_to_send[0].caption = user_info
-            
             bot.send_media_group(SOURCE_CHAT_ID, media_to_send)
             
             # Send photos with recognized text to TARGET_CHANNEL_ID
@@ -91,10 +87,10 @@ def process_media_group(media_group_id, user_info):
     except Exception as e:
         logger.error(f"Error processing media group: {e}")
 
-def delayed_process_media_group(media_group_id, user_info):
+def delayed_process_media_group(media_group_id):
     """Process media group after a delay to collect all messages"""
     time.sleep(1)  # Wait 1 second to collect all messages in the group
-    process_media_group(media_group_id, user_info)
+    process_media_group(media_group_id)
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
@@ -115,9 +111,6 @@ def handle_start(message):
 @bot.message_handler(func=lambda message: message.chat.id == SOURCE_CHAT_ID and message.forward_date is not None, content_types=['photo', 'video'])
 def handle_forwarded_media(message):
     try:
-        user_id = message.from_user.id
-        sender_info = f"{message.from_user.full_name} @{message.from_user.username}" if message.from_user.username else message.from_user.full_name or f"Пользователь ID {user_id}"
-
         # Check if this is part of a media group
         if message.media_group_id:
             media_group_id = message.media_group_id
@@ -128,7 +121,7 @@ def handle_forwarded_media(message):
                 media_group_timers[media_group_id].cancel()
             
             import threading
-            timer = threading.Timer(1.0, delayed_process_media_group, args=(media_group_id, sender_info))
+            timer = threading.Timer(1.0, delayed_process_media_group, args=(media_group_id,))
             media_group_timers[media_group_id] = timer
             timer.start()
             
@@ -136,17 +129,14 @@ def handle_forwarded_media(message):
             # Single media message - process immediately
             if message.photo:
                 file_id = message.photo[-1].file_id
-                # Forward to SOURCE_CHAT_ID
-                bot.send_photo(SOURCE_CHAT_ID, file_id, caption=sender_info)
-                # Recognize text and send to TARGET_CHANNEL_ID
+                bot.send_photo(SOURCE_CHAT_ID, file_id)
                 text = recognize_text_from_photo(file_id)
                 if text:
                     bot.send_photo(TARGET_CHANNEL_ID, file_id, caption=text)
 
             elif message.video:
                 file_id = message.video.file_id
-                # Forward to SOURCE_CHAT_ID
-                bot.send_video(SOURCE_CHAT_ID, file_id, caption=sender_info, supports_streaming=True)
+                bot.send_video(SOURCE_CHAT_ID, file_id, supports_streaming=True)
 
             # Delete the original forwarded message
             bot.delete_message(message.chat.id, message.message_id)
@@ -197,7 +187,6 @@ def handle_video_links(message):
                 bot.send_video(
                     SOURCE_CHAT_ID,
                     video=v,
-                    caption=f'{message.from_user.full_name} \n@{message.from_user.username}',
                     supports_streaming=True
                 )
                 bot.delete_message(message.chat.id, message.message_id)
